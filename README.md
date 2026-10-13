@@ -1,3 +1,5 @@
+
+# How does Compression degrade PRNU-based Source Camera Identification?
 With the continued growth and adoption of digital media, the need to attribute digital images to
 their sources after they have been acquired remains a fundamental problem in multimedia forensics.
 So far, many studies have identified that Source Camera Identification (SCI) using 
