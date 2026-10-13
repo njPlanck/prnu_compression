@@ -33,3 +33,4 @@ saved_models/
 src_code/__pycache__/
 testai/
 trainai/
+fivek_rgb_green_wavelet_fingerprints/

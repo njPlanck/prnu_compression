@@ -9,294 +9,358 @@ import imagecodecs
 from piq import psnr, ssim, brisque
 import torchvision.transforms as transforms
 import csv
-import pyjxl
-import glymur
-import math
-
-cjxl_path = r"C:/Program Files/jxl-x64-windows-static/cjxl.exe"  # Replace with actual path to cjxl.exe
-djxl_path = r"C:/Program Files/jxl-x64-windows-static/djxl.exe"
-
+import rawpy
+import jxlpy
+import tempfile
+import shutil
 
 # Global transform
 transform = transforms.ToTensor()
 
-def evaluate_metrics(img1, img2):
-    if img1.mode != "RGB":
-        img1 = img1.convert("RGB")
-    if img2.mode != "RGB":
-        img2 = img2.convert("RGB")
+def load_input_image_as_pil(input_path):
+    """Safely opens standard images OR develops RAW DNG images into a PIL Image."""
+    if input_path.lower().endswith(".dng"):
+        with rawpy.imread(input_path) as raw:
+            rgb_array = raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True)
+        return Image.fromarray(rgb_array)
+    else:
+        return Image.open(input_path).convert("RGB")
 
+def load_input_image_as_cv2(input_path):
+    """Safely opens standard images OR develops RAW DNG images into a BGR OpenCV matrix."""
+    if input_path.lower().endswith(".dng"):
+        with rawpy.imread(input_path) as raw:
+            rgb_array = raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True)
+        return cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+    else:
+        return cv2.imread(input_path, cv2.IMREAD_COLOR)
+
+def compute_bpp(file_path, width, height):
+    size_bytes = os.path.getsize(file_path)
+    return (size_bytes * 8) / (width * height)
+
+def evaluate_metrics(img1, img2):
+    if img1.mode != "RGB": img1 = img1.convert("RGB")
+    if img2.mode != "RGB": img2 = img2.convert("RGB")
     x = transform(img1).unsqueeze(0)
     y = transform(img2).unsqueeze(0)
-
     if x.shape[1] != y.shape[1]:
-        if x.shape[1] == 1:
-            x = x.repeat(1, 3, 1, 1)
-        if y.shape[1] == 1:
-            y = y.repeat(1, 3, 1, 1)
-
+        if x.shape[1] == 1: x = x.repeat(1, 3, 1, 1)
+        if y.shape[1] == 1: y = y.repeat(1, 3, 1, 1)
     return {
         "PSNR": psnr(x, y, data_range=1.0).item(),
         "SSIM": ssim(x, y).item(),
         "BRISQUE": brisque(y).item()
     }
 
-
-def compress_jpeg(input_path, output_path, target_size_kb, min_quality=1, max_quality=25):
-    img1 = Image.open(input_path).convert("RGB")
+def compress_jpeg(input_path, output_path, target_size_kb, min_quality=1, max_quality=100):
+    img1 = load_input_image_as_pil(input_path)
     target_bytes = target_size_kb * 1024
-
-    low = min_quality
-    high = max_quality
-    best_quality = low
+    low, high = min_quality, max_quality
+    
     best_data = None
-
+    best_diff = float("inf")
+    
     while low <= high:
         quality = (low + high) // 2
         buffer = io.BytesIO()
-        img1.save(buffer, "JPEG",
-                  quality=quality,
-                  subsampling=2,        # 4:2:0 chroma subsampling (most compressed)
-                  optimize=True,        # Huffman table optimization
-                  progressive=True)     # Progressive encoding
-        size = buffer.tell()
-
-        if size <= target_bytes:
-            best_quality = quality
-            best_data = buffer.getvalue()
-            low = quality + 1  # Try higher quality next
+        img1.save(buffer, "JPEG", quality=quality, subsampling=0, optimize=True, progressive=False)
+        
+        data = buffer.getvalue()
+        size = len(data)
+        diff = abs(size - target_bytes)
+        
+        # Always save the data that gets closest to the absolute target size
+        if diff < best_diff:
+            best_diff = diff
+            best_data = data
+            
+        # Break early if we hit the target within a tiny 1% tolerance
+        if diff < target_bytes * 0.01:
+            break
+            
+        if size > target_bytes:
+            # File is too big -> decrease quality
+            high = quality - 1
         else:
-            high = quality - 1  # Try lower quality next
+            # File is too small -> increase quality
+            low = quality + 1
 
     if best_data is not None:
         with open(output_path, "wb") as f:
             f.write(best_data)
+            width, height = img1.size
+            bpp = compute_bpp(output_path, width, height)
+            metrics = evaluate_metrics(img1, Image.open(output_path).convert("RGB"))
+            metrics["BPP"] = bpp
+        return metrics
+    return {"error": "Target size unreachable"}
 
-        img2 = Image.open(output_path).convert("RGB")
-        return evaluate_metrics(img1, img2)  # Assumes this is defined
-
-    return {"error": f"Could not compress to target size. Best achieved: {size // 1024}KB"}
-
-
-def compress_jp2(input_path, output_path, target_size_kb, min_q=1, max_q=1000, max_attempts=1000):
-    """Optimized JPEG2000 compression using OpenCV with in-memory binary search."""
+def compress_jp2(input_path, output_path, target_size_kb, min_q=1, max_q=1000):
     target_bytes = target_size_kb * 1024
-
-    # Check if original is already small enough
-    original_size = os.path.getsize(input_path)
-    if original_size <= target_bytes:
-        #shutil.copy2(input_path, output_path)
-        return {
-            "note": "Original image already smaller than target",
-            "achieved_size_kb": original_size // 1024,
-            "quality": "original"
-        }
-
-    # Read input image once
-    img_cv = cv2.imread(input_path)
-    if img_cv is None:
-        return {"error": "Failed to read input image"}
-
-    best_q = -1
-    best_buf = None
-    best_size = float("inf")
-
+    img_cv = load_input_image_as_cv2(input_path)
+    if img_cv is None: return {"error": "Read failed"}
+    img1_pil = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     low, high = min_q, max_q
-
-    for _ in range(max_attempts):
-        if low > high:
-            break
-
+    best_buf = None
+    while low <= high:
         mid_q = (low + high) // 2
-
-        success, encoded_img = cv2.imencode(
-            ".jp2", img_cv, [cv2.IMWRITE_JPEG2000_COMPRESSION_X1000, mid_q]
-        )
-        if not success:
-            continue
-
-        size = len(encoded_img)
-
-        if size <= target_bytes:
-            best_q = mid_q
+        success, encoded_img = cv2.imencode(".jp2", img_cv, [cv2.IMWRITE_JPEG2000_COMPRESSION_X1000, mid_q])
+        if not success: continue
+        if len(encoded_img) <= target_bytes:
             best_buf = encoded_img
-            best_size = size
-            low = mid_q + 1  # Try higher quality
+            low = mid_q + 1
         else:
             high = mid_q - 1
-
-        # Close enough (within 1%)
-        if abs(size - target_bytes) < 0.01 * target_bytes:
-            best_q = mid_q
-            best_buf = encoded_img
-            best_size = size
-            break
-
-    # Save best result to disk
     if best_buf is not None:
         with open(output_path, "wb") as f:
             f.write(best_buf.tobytes())
-
-        # Optional: compute metrics
-        img_original = Image.open(input_path).convert("RGB")
-        img_compressed = Image.open(output_path).convert("RGB")
-        metrics = evaluate_metrics(img_original, img_compressed)
-        metrics.update({
-            "achieved_size_kb": best_size // 1024,
-            "quality": best_q,
-        })
+            width, height = img1_pil.size
+            bpp = compute_bpp(output_path, width, height)
+            decoded = cv2.imdecode(best_buf, cv2.IMREAD_COLOR)
+            metrics = evaluate_metrics(img1_pil, Image.fromarray(cv2.cvtColor(decoded, cv2.COLOR_BGR2RGB)))
+            metrics["BPP"] = bpp
         return metrics
+    return {"error": "Target size unreachable"}
 
-    return {
-        "error": "Could not reach target size",
-        "best_size_kb": best_size // 1024,
-        "best_quality": best_q,
-    }
+def compress_jxr(input_path, output_path, target_size_kb, tolerance=0.01, max_iterations=10):
+    img_bgr = load_input_image_as_cv2(input_path)
+    if img_bgr is None:
+        return {"error": "Read failed"}
 
-def compress_jxr(input_path, output_path, target_size_kb, min_quality=0, max_quality=100):
-    img1 = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
-    img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
-    img1 = Image.fromarray(img1)
-    img = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
-    if img is None:
-        return {"error": "Image read failed"}
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    if not img_rgb.flags["C_CONTIGUOUS"]:
+        img_rgb = np.ascontiguousarray(img_rgb)
 
+    img1_pil = Image.fromarray(img_rgb)
     target_bytes = target_size_kb * 1024
-    low, high = min_quality, max_quality
+
+    try:
+        imagecodecs.jpegxr_encode(img_rgb[:10, :10], level=0.5)
+    except Exception as e:
+        return {"error": f"JPEG-XR encoder unavailable: {e}"}
+
+    try:
+        size_at_0 = len(imagecodecs.jpegxr_encode(img_rgb, level=0.0))
+        size_at_1 = len(imagecodecs.jpegxr_encode(img_rgb, level=1.0))
+    except Exception as e:
+        return {"error": f"JPEG-XR initial evaluation failed: {e}"}
+
+    is_inverse = size_at_0 > size_at_1
+
+    low, high = 0.0, 1.0
     best_data = None
+    best_diff = float("inf")
 
-    while low <= high:
-        q = (low + high) // 2
-        jxr_data = imagecodecs.jpegxr_encode(img, level=q / 100.0)
+    for _ in range(max_iterations):
+        level = (low + high) / 2.0
+        try:
+            jxr_data = imagecodecs.jpegxr_encode(img_rgb, level=level)
+        except Exception as e:
+            return {"error": f"JPEG-XR encode failed: {e}"}
 
-        if len(jxr_data) <= target_bytes:
+        size = len(jxr_data)
+        diff = abs(size - target_bytes)
+
+        if diff < best_diff:
+            best_diff = diff
             best_data = jxr_data
-            low = q + 1
-        else:
-            high = q - 1
 
-    if best_data:
+        if diff < target_bytes * tolerance:
+            break
+
+        if size < target_bytes:
+            if is_inverse:
+                high = level
+            else:
+                low = level
+        else:
+            if is_inverse:
+                low = level
+            else:
+                high = level
+
+    if best_data is None:
+        return {"error": "No valid JPEG-XR output generated"}
+
+    try:
         with open(output_path, "wb") as f:
             f.write(best_data)
-        img2 = imagecodecs.jxr_decode(best_data)
-        img2_pil = Image.fromarray(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
-        return evaluate_metrics(img1, img2_pil)
-    return {"error": "JXR compression failed"}
+    except Exception as e:
+        return {"error": f"Failed writing output: {e}"}
 
-
-
-def compress_jxl(input_path, output_path, target_size_kb, start_quality=5, max_quality=100, step=2):
-    img1 = Image.open(input_path).convert("RGB")
-    best_quality = start_quality
-    best_size = None
-
-    for quality in range(start_quality, max_quality + 1, step):
-        subprocess.run(["magick", input_path, "-quality", str(quality), output_path], check=True)
-
-        if not os.path.exists(output_path):
-            break
-
-        size_kb = os.path.getsize(output_path) / 1024
-       # print(f"Quality {quality} -> {size_kb:.1f} KB")
-
-        if size_kb <= target_size_kb:
-            best_quality = quality
-            best_size = size_kb
+    try:
+        decoded_arr = imagecodecs.jpegxr_decode(best_data)
+        if decoded_arr.ndim == 2:
+            img2_pil = Image.fromarray(decoded_arr).convert("RGB")
+        elif decoded_arr.ndim == 3 and decoded_arr.shape[2] == 4:
+            img2_pil = Image.fromarray(decoded_arr[:, :, :3])
         else:
+            img2_pil = Image.fromarray(decoded_arr)
+        
+        width, height = img1_pil.size
+        metrics = evaluate_metrics(img1_pil, img2_pil)
+        metrics["BPP"] = (os.path.getsize(output_path) * 8) / (width * height)
+        return metrics
+    except Exception as e:
+        return {"error": f"JPEG-XR decode failed: {e}"}
+
+def compress_jxl(input_path, output_path, target_size_kb, tolerance=0.01, max_iterations=20):
+    """
+    Optimized JXL compression loop with 20 iterations and a higher distance ceiling 
+    for maximum precision against the target file size.
+    """
+    if shutil.which("cjxl") is None or shutil.which("djxl") is None:
+        return {"error": "cjxl or djxl toolkit not found in system PATH"}
+
+    img = load_input_image_as_pil(input_path)
+    target_bytes = target_size_kb * 1024
+
+    temp_png = output_path + ".tmp.png"
+    temp_jxl = output_path + ".tmp.jxl"
+    best_jxl = output_path + ".best.jxl"
+    temp_decode_png = output_path + ".decoded.png"
+    
+    img.save(temp_png, "PNG")
+
+    # Expanded search space to account for highly complex images
+    low, high = 0.0, 50.0
+    best_diff = float("inf")
+
+    for _ in range(max_iterations):
+        d = (low + high) / 2.0
+        # Increased decimal formatting for tighter granularity
+        cmd = ["cjxl", temp_png, temp_jxl, "-d", f"{d:.4f}", "--effort", "7"]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if result.returncode != 0:
+            # If the distance pushes past what this cjxl version allows, shrink the upper bound
+            high = d
+            continue
+
+        size = os.path.getsize(temp_jxl)
+        diff = abs(size - target_bytes)
+
+        # Always save the absolute closest iteration
+        if diff < best_diff:
+            best_diff = diff
+            shutil.copyfile(temp_jxl, best_jxl)
+
+        # Break early if we nail it within the tiny tolerance margin
+        if diff < target_bytes * tolerance:
             break
 
-    #print(f"Using best quality {best_quality} ({best_size:.1f} KB)")
-    subprocess.run(["magick", input_path, "-quality", str(best_quality), output_path], check=True)
+        if size > target_bytes:
+            # File is too big -> increase distance for more compression
+            low = d
+        else:
+            # File is too small -> decrease distance for better quality
+            high = d
 
-    # Evaluate metrics
-    result = subprocess.run(
-        ["magick", output_path, "png:-"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True
-    )
-    img2 = Image.open(io.BytesIO(result.stdout))
-    return evaluate_metrics(img1, img2)
+    # Cleanup temporary working files
+    for path in (temp_png, temp_jxl):
+        if os.path.exists(path):
+            os.remove(path)
 
+    if not os.path.exists(best_jxl):
+        return {"error": "Binary search failed to produce a valid JPEG XL file"}
 
+    # Finalize the best match
+    shutil.move(best_jxl, output_path)
+    width, height = img.size
+    bpp = compute_bpp(output_path, width, height)
+    
+    try:
+        subprocess.run(
+            ["djxl", output_path, temp_decode_png],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True
+        )
+        img2 = Image.open(temp_decode_png).convert("RGB")
+        img2.load() 
+    except Exception as e:
+        return {"error": f"JPEG XL verification decode failed: {e}"}
+    finally:
+        if os.path.exists(temp_decode_png):
+            os.remove(temp_decode_png)
 
+    metrics = evaluate_metrics(img, img2)
+    metrics["BPP"] = bpp
+    return metrics
 
-def compress_all_images_by_camera(main_input_dir, main_output_dir, target_size_kb):
+def process_and_isolate_dataset(flat_input_dir, main_output_dir, target_size_kb):
     formats = ["jpeg", "jp2", "jxr", "jxl"]
-    compressors = {
-        "jpeg": compress_jpeg,
-        "jp2": compress_jp2,
-        "jxr": compress_jxr,
-        "jxl": compress_jxl
-    }
+    compressors = {"jpeg": compress_jpeg, "jp2": compress_jp2, "jxr": compress_jxr, "jxl": compress_jxl}
+    metrics_by_camera = {}
 
-    os.makedirs(main_output_dir, exist_ok=True)
+    print("Initializing Format-First Directory Architecture...")
 
-    # Loop through each camera folder in the main input directory
-    for camera_name in os.listdir(main_input_dir):
-        camera_input_path = os.path.join(main_input_dir, camera_name)
-        if not os.path.isdir(camera_input_path):
-            continue  # Skip files
+    for root, _, files in os.walk(flat_input_dir):
+        for filename in files:
+            if filename.lower().endswith((".jpg", ".jpeg", ".png", ".tiff", ".dng")) and not filename.startswith("merge"):
+                input_path = os.path.join(root, filename)
+                
+                # 1. Identify camera directly by the parent folder name
+                rel_path = os.path.relpath(root, flat_input_dir)
+                
+                # Skip loose images without a camera folder
+                if rel_path == ".":
+                    print(f"  X Skipped (No parent folder identified): {filename}")
+                    continue
+                
+                # The primary subfolder dictates the camera model
+                camera_name = rel_path.split(os.sep)[0]
+                camera_safe_name = camera_name.replace(" ", "_")
 
-        print(f"\n Processing Camera: {camera_name}")
+                # Create safe naming based on directory structure to prevent overwriting
+                image_base_name = os.path.splitext(filename)[0]
+                folder_prefix = rel_path.replace(os.sep, "_")
+                unique_name = f"{folder_prefix}_{image_base_name}"
 
-        # Create base output path for this camera
-        camera_output_path = os.path.join(main_output_dir, camera_name)
-        os.makedirs(camera_output_path, exist_ok=True)
+                print(f"\n Image: {unique_name} ➔ Identified Camera: {camera_name}")
 
-        # Create subfolders for each compression format under this camera
-        for fmt in formats:
-            os.makedirs(os.path.join(camera_output_path, fmt), exist_ok=True)
-
-        # Store metrics for CSV
-        csv_data = []
-
-        # Loop through all images in this camera's folder
-        for filename in os.listdir(camera_input_path):
-            if filename.lower().endswith((".jpg", ".jpeg", ".png")):
-                input_path = os.path.join(camera_input_path, filename)
-                print(f"\n Compressing: {filename}")
-                image_name = os.path.splitext(filename)[0]
-
+                # 2. Build designated output infrastructure (Format -> Camera)
                 for fmt in formats:
-                    output_path = os.path.join(camera_output_path, fmt, f"{image_name}.{fmt}")
+                    os.makedirs(os.path.join(main_output_dir, fmt, camera_safe_name), exist_ok=True)
+
+                if camera_name not in metrics_by_camera:
+                    metrics_by_camera[camera_name] = []
+
+                # 3. Compress across pipelines
+                for fmt in formats:
+                    output_path = os.path.join(main_output_dir, fmt, camera_safe_name, f"{unique_name}.{fmt}")
                     metrics = compressors[fmt](input_path, output_path, target_size_kb)
 
                     if "error" in metrics:
-                        print(f" {fmt.upper()} - {metrics['error']}")
-                        csv_data.append({
-                            "Image": filename,
-                            "Format": fmt.upper(),
-                            "PSNR": None,
-                            "SSIM": None,
-                            "BRISQUE": None,
-                            "Status": metrics["error"]
+                        print(f"    X {fmt.upper()}: {metrics['error']}")
+                        metrics_by_camera[camera_name].append({
+                            "Image": f"{unique_name}.{fmt}", "Format": fmt.upper(), 
+                            "PSNR": None, "SSIM": None, "BRISQUE": None, "BPP": None, "Status": metrics["error"]
                         })
                     else:
-                        print(f"{fmt.upper()} - PSNR: {metrics['PSNR']:.2f}, SSIM: {metrics['SSIM']:.4f}, BRISQUE: {metrics['BRISQUE']:.2f}")
-                        csv_data.append({
-                            "Image": filename,
-                            "Format": fmt.upper(),
-                            "PSNR": round(metrics["PSNR"], 2),
-                            "SSIM": round(metrics["SSIM"], 4),
-                            "BRISQUE": round(metrics["BRISQUE"], 2),
-                            "Status": "OK"
+                        print(f"    ✓ {fmt.upper()}: PSNR={metrics['PSNR']:.2f}, SSIM={metrics['SSIM']:.4f}, BPP={metrics['BPP']:.4f}")
+                        metrics_by_camera[camera_name].append({
+                            "Image": f"{unique_name}.{fmt}", "Format": fmt.upper(),
+                            "PSNR": round(metrics["PSNR"], 2), "SSIM": round(metrics["SSIM"], 4), 
+                            "BRISQUE": round(metrics["BRISQUE"], 2), "BPP": round(metrics["BPP"], 4), "Status": "OK"
                         })
 
-        # Save per-camera CSV
-        csv_path = os.path.join(camera_output_path, f"{camera_name}_metrics.csv")
+    # 4. Finalize and write metrics CSV to the root of the output directory
+    for camera_name, csv_rows in metrics_by_camera.items():
+        camera_folder_name = camera_name.replace(" ", "_")
+        csv_path = os.path.join(main_output_dir, f"{camera_folder_name}_metrics.csv")
+        
         with open(csv_path, "w", newline="") as csvfile:
-            fieldnames = ["Image", "Format", "PSNR", "SSIM", "BRISQUE", "Status"]
+            fieldnames = ["Image", "Format", "PSNR", "SSIM", "BRISQUE", "BPP", "Status"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(csv_data)
+            writer.writerows(csv_rows)
+        print(f"\n📊 Performance Matrix saved for {camera_name} at: {csv_path}")
 
-        print(f"\n Metrics saved for {camera_name}: {csv_path}")
+if __name__ == "__main__":
+    main_input_folder = "/home/chinasa/python_projects/fivek_prnu_split/query_set" 
+    main_output_folder = "/home/chinasa/python_projects/fivek_prnu_split/query_set_compressed_500kb"
+    target_kb = 500
 
-
-# Example usage
-main_input_folder = "train_images"
-main_output_folder = "compressed_results_10kb/train_images"
-target_kb = 10
-
-compress_all_images_by_camera(main_input_folder, main_output_folder, target_kb)
+    process_and_isolate_dataset(main_input_folder, main_output_folder, target_kb)
