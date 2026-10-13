@@ -34,3 +34,4 @@ src_code/__pycache__/
 testai/
 trainai/
 fivek_rgb_green_wavelet_fingerprints/
+fivek_rgb_green_sigma_fingerprints/
