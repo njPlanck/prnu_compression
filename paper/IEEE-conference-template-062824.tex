@@ -13,7 +13,7 @@
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 \begin{document}
 
-\title{PRNU: The Robustness of Source Camera Identification against Compression
+\title{PRNU: How does Compression degrade Source Camera Identification?
 }
 
 \author{\IEEEauthorblockN{Chinasa Njoku}
@@ -31,14 +31,15 @@ With the continued growth and adoption of digital media, the need to attribute d
 their sources after they have been acquired remains a fundamental problem in multimedia forensics.
 So far, many studies have identified that Source Camera Identification (SCI) using 
 Photo Response Non-Uniformity (PRNU) degrades under compression. These studies mostly assess baseline 
-JPEG and its impact at different Quality Factors (QFs). However, for a given QF, different images 
-compress to different sizes. This is problematic for evaluating the effect of compression in the real-world setting,
-as in most networks and storage systems the target size is often the fixed parameter while the QF varies per image. 
-In this paper we  evaluate the SCI performace under compression at different target bitrates,
+JPEG and its impact at different Quality Factors (QFs). However, the challenge is that for a given QF, different images 
+compress to different sizes. This is problematic for evaluating the effect of compression in the real-world setting.
+In most networks and storage applications the target size is often the fixed parameter while the QF varies per image. 
+So in this paper we take a new approach to evaluate the SCI performance under compression at different target bitrates,
 simulating real-world strict bandwidth and storage constraints. 
-We also extend this evaluation to the more recent compression schemes like JPEG 2000, JPEG XR and JPEG XL.
-This is to provides a codec recommendation for severe image degradation at very low bitrates that mostly 
-preserve the integrity of the forensic signal required for SCI. For the experiment, the Adobe Fivek dataset 
+This evaluation is further extended to the more recent compression schemes like JPEG 2000, JPEG XR and JPEG XL.
+This proposes a codec recommendation for severe image degradation at very low bitrates that mostly 
+preserve the integrity of the forensic signal required for SCI. In addition to the codec recommendation, the robustness
+of the PRNU signal is also assessed for both Wavelet and Sigma Filters. For the experiment, the Adobe FiveK dataset 
 was used with 17 cameras selected between three different camera brands (NIKON, Canon and Sony).  
 \end{abstract}
 
@@ -53,7 +54,7 @@ Once an image is acquired and shared, it becomes quite difficult to trace back
 to the originating sensor if it is not explicitly labeled. Over the years, 
 several methods have been developed for reliable SCI.
 A very popular technique relies on the unique sensor artifacts that are
-present in the image scene. This is also know as PRNU.
+present in the image scene. This is also know as the PRNU of the camera.
 
 The PRNU is formed as a result slight microscopic variations in the pixel 
 silicon during manufacturing that causes individual pixels to have different sensitivities
@@ -61,17 +62,30 @@ to light. Therefore once two or more different cameras are used to capture a par
 we can reliably trace which camera generated what image from the noise residue
 in each image if we know the PRNU reference pattern of the cameras.
 
-This method of SCI is highly effective. But in real world applications the acquired
-images are rarely in their raw state during source attribution. In other to store
-or transfer them over networks, these images undergo compression most times. Many studies already 
-show that SCI performace degrades as more scene content is removed during compression.
-With baseline JPEG, as images are comppressed varying the QFs. However, different images compress
-to different sizes given the same QF.
-This is particularly challenging if we properly evaluate the imapact of compression under real-world
-constraints as most network and storage systems are designed to vary QFs in other to achieve a
-target bitrate or size.
+This method of SCI is relatively more robust because tracing an image source does not require explicit device
+information from the metadata. To identify a source camera, what is needed is only the fixed noise pattern
+of the camera.
+However, in real world applications the acquired images are rarely in their raw state during source attribution.
+In other to store or transfer them over networks, these images undergo compression most times.
+Many studies already show that pre-storage or transmission compression after acquisition degrade SCI performance.
+But these experiments are mostly with baseline JPEG often with fixed QFs. While this shows the substantive 
+degrading effect of the forensic signal due to compression, a fixed QF compresses different images
+to different sizes. This is particularly challenging to
+properly evaluate the impact of compression under real-world constraints as most network and storage
+systems are designed to vary QFs in other to achieve a target bandwidth.
 
-In this work, we are going to 
+In this work, we propose a more realistic approach where the target size is fixed
+and the QF varies per image. This assessment extends to different codecs like JPEG2000,
+JPEGXR and JPEGXL to evaluate how much of this degradation is codec dependent. Understanding the
+codec dependence is particularly important as a different codecs employ different algorithms and
+transforms which leave different artifacts in the images. For example, the baseline JPEG compression leaves 
+blocky artifacts on the compressed image and based on 8X8 Discrete Cosine Tranform (DCT), while
+JPEG2000 on the other hand is based on Discrete Wavelet Transform (DWT) andintroduces a ringing 
+artifact on the corresponding image. JPEGXR and JPEGXL are also based of DCT blocks, but unlike
+the baseline JPEG, employ varying DCT blocks sizes and other techniques to reduce the blocky artifacts.
+These relatively newer codecs natively include an inloop filter in the pipeline.
+
+
 
 
 \subsection{Maintaining the Integrity of the Specifications}

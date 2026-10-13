@@ -328,14 +328,14 @@ def evaluate_dataset(
             # Periodic Checkpoint Saving to prevent data loss
             if (i + 1) % checkpoint_interval == 0:
                 temp_df = pd.DataFrame([r for r in results]).drop(columns=['ROC_Pairs'], errors='ignore')
-                temp_df.to_excel(f"results/jxr_500kb_pce_evaluation_checkpoint_{filter_type}.xlsx", index=False)
+                temp_df.to_excel(f"results/jxl_500kb_pce_evaluation_checkpoint_{filter_type}.xlsx", index=False)
 
     if not results:
         print("\n[!] No valid results were computed.")
         return
 
     df_results = pd.DataFrame(results).drop(columns=['ROC_Pairs'])
-    pce_excel_path = f"results/jxr_500kb_pce_evaluation_results_{filter_type}.xlsx"
+    pce_excel_path = f"results/jxl_500kb_pce_evaluation_results_{filter_type}.xlsx"
     df_results.to_excel(pce_excel_path, index=False)
     print(f"\n[✓] PCE scores saved to {pce_excel_path}")
 
@@ -372,11 +372,11 @@ def evaluate_dataset(
             tpr_at_5_fpr = np.max(tpr[valid_5])
 
         df_roc = pd.DataFrame({'FPR': fpr, 'TPR': tpr, 'Threshold': thresholds})
-        roc_excel_path = f"results/jxr_500kb_roc_curve_{filter_type}.xlsx"
+        roc_excel_path = f"results/jxl_500kb_roc_curve_{filter_type}.xlsx"
         df_roc.to_excel(roc_excel_path, index=False)
         print(f"[✓] ROC curve saved to {roc_excel_path}")
 
-    summary_excel_path = f"results/jxr_500kb_evaluation_metrics_summary_{filter_type}.xlsx"
+    summary_excel_path = f"results/jxl_500kb_evaluation_metrics_summary_{filter_type}.xlsx"
     df_prnu_metrics = pd.DataFrame({
         'Metric': [
             'ROC-AUC',
@@ -425,7 +425,7 @@ if __name__ == "__main__":
     except RuntimeError:
         pass
 
-    QUERY_SET_DIR = "/home/chinasa/python_projects/fivek_prnu_split/query_set_compressed_3mb/jxr"
+    QUERY_SET_DIR = "/home/chinasa/python_projects/fivek_prnu_split/query_set_compressed_500kb/jxl"
     FINGERPRINT_DIR = "/home/chinasa/python_projects/prnu_compression/fivek_rgb_green_wavelet_fingerprints"
 
     evaluate_dataset(
@@ -434,5 +434,5 @@ if __name__ == "__main__":
         filter_type='wavelet',
         search_radius=60,
         max_workers=4,
-        patch_size=(1024, 1024)
+        patch_size=(512, 512)
     )

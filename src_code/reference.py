@@ -237,10 +237,10 @@ def build_master_fingerprints(
 
 if __name__ == "__main__":
     ref_dir = "/home/chinasa/python_projects/fivek_prnu_split/reference_set"
-    out_dir = "/home/chinasa/python_projects/prnu_compression/fivek_rgb_green_wavelet_fingerprints"
+    out_dir = "/home/chinasa/python_projects/prnu_compression/fivek_rgb_green_sigma_fingerprints"
 
     build_master_fingerprints(
         reference_dir=ref_dir,
         output_fingerprint_dir=out_dir,
-        filter_type='wavelet'
+        filter_type='sigma'
     )

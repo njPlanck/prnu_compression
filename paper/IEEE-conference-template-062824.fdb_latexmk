@@ -1,7 +1,7 @@
 # Fdb version 4
-["pdflatex"] 1791864441.67505 "/home/chinasa/python_projects/prnu_compression/paper/IEEE-conference-template-062824.tex" "IEEE-conference-template-062824.pdf" "IEEE-conference-template-062824" 1791864442.09709 0
+["pdflatex"] 1791925551.78948 "/home/chinasa/python_projects/prnu_compression/paper/IEEE-conference-template-062824.tex" "IEEE-conference-template-062824.pdf" "IEEE-conference-template-062824" 1791925553.39864 0
   "/etc/texmf/web2c/texmf.cnf" 1777396490.95357 475 c0e671620eb5563b2130f56340a5fde8 ""
-  "/home/chinasa/python_projects/prnu_compression/paper/IEEE-conference-template-062824.tex" 1791864441.28341 17508 246c55ec21e993d4671f6cb1439fd3bf ""
+  "/home/chinasa/python_projects/prnu_compression/paper/IEEE-conference-template-062824.tex" 1791925551.30481 18896 e30a4ab20cb456c3b170824dd7536787 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/adobe/courier/pcrr7t.tfm" 1136768653 960 379cc0019370a9e0208a0a3f949f847a ""
@@ -80,8 +80,8 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1707919699 40399 f2c302f7d2af602abb742093540a5834 ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1777399374.14977 165012 f177baa1c39a3ebd62c3096a43521a0d ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1777399390 6831174 fb819a35c15b98bcb37a8050d0ba6dbd ""
-  "IEEE-conference-template-062824.aux" 1791864442.03342 2452 6ab43e9911df8156c1b2f79b37ba7d84 "pdflatex"
-  "IEEE-conference-template-062824.tex" 1791864441.28341 17508 246c55ec21e993d4671f6cb1439fd3bf ""
+  "IEEE-conference-template-062824.aux" 1791925553.16483 2452 fbe0f1de84cdf298679c1db3da4ff533 "pdflatex"
+  "IEEE-conference-template-062824.tex" 1791925551.30481 18896 e30a4ab20cb456c3b170824dd7536787 ""
   "fig1.png" 1784739654.11342 13815 9af23e798dccf51edbe98938c641893e ""
   (generated)
   "IEEE-conference-template-062824.aux"
