@@ -52,3 +52,45 @@ The scripts use the Adobe FiveK DNG images and expect them to be split into came
    The evaluation script defaults to the JPEG 2000 (`jp2`) compressed images and the
    Wavelet filter. It writes evaluation spreadsheets under `results/`. To evaluate a
    different codec or filter, update the corresponding settings in `src_code/query.py`.
+
+### JPEG-AI reference compression
+
+The optional JPEG-AI pipeline is in the included
+[reference software](src_code/jpeg-ai-reference-software/README.md). Follow its README
+to configure the `jpeg_ai_vm` environment, build the required libraries, and obtain
+the model files before running the wrapper. From the reference software directory:
+
+```bash
+conda activate jpeg_ai_vm
+python -m pip install rawpy piq
+python jpeg_ai_compression.py
+```
+
+The defaults in `jpeg_ai_compression.py` are set to the FiveK `query_set`
+directories used in this workspace; edit `DEFAULT_INPUT_DIR`,
+`DEFAULT_OUTPUT_DIR`, and `DEFAULT_TARGET_SIZE_KIB` near the top of that file to
+run directly from an IDE or terminal without arguments. Positional paths and
+`--target-size-kb` override those defaults, for example:
+
+```bash
+python jpeg_ai_compression.py /path/to/camera_images /path/to/jpeg_ai_outputs \
+  --target-size-kb 50 100 200
+```
+
+`--target-size-kb` accepts one or more per-image target sizes in KiB (1024 bytes).
+The script demosaics camera RAW inputs with `rawpy`, stages every source image as
+RGB PNG for JPEG-AI (whose reference encoder accepts PNG/YUV). Reconstructed PNGs
+are created temporarily for quality metrics and removed after each image. The
+persistent per-image outputs are JPEG-AI bitstreams; per-camera metrics CSVs are
+also written. CSV reports include requested size, actual bitstream size,
+target/actual BPP, and image quality metrics. JPEG-AI rate control targets BPP
+derived from each image's pixel count, so actual bitstream sizes can differ from
+the requested sizes due to codec rate-control precision and stream overhead.
+Input subfolders are traversed recursively and retained in the output; the first
+subfolder level is treated as the camera name and receives its own metrics CSV.
+The output directory must be outside the input tree to avoid reprocessing
+generated files.
+
+For a fixed rate rather than a per-image file-size goal, omit `--target-size-kb` and
+use `--set-target-bpp N`, where `N` is the target rate in hundredths of a bit per
+pixel (for example, `12` means `0.12` bpp).
