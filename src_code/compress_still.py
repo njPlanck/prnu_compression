@@ -1,4 +1,4 @@
-"""Compress camera image datasets with AVIF, HEIC, BPG, and WebP."""
+"""Compress camera image datasets with AVIF, HEIC, BPG, and WebP still-image codecs."""
 
 from __future__ import annotations
 
@@ -185,35 +185,52 @@ def load_input_image(input_path: Path) -> Image.Image:
         return ImageOps.exif_transpose(source).convert("RGB")
 
 
-def _encode_candidate(
-    codec: str,
+def _run_encoder(codec: str, command: List[str], output_path: Path) -> None:
+    result = _run(command)
+    if result.returncode != 0 or not output_path.is_file():
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            detail
+            or f"{codec.upper()} encoder failed with exit code {result.returncode}"
+        )
+
+
+def _encode_avif_candidate(
+    input_png: Path,
+    output_path: Path,
+    quality: int,
+) -> None:
+    if IMAGEMAGICK is None:
+        raise RuntimeError("AVIF encoding requires ImageMagick")
+    command = [
+        IMAGEMAGICK,
+        str(input_png),
+        "-strip",
+        "-quality",
+        str(quality),
+        "-define",
+        f"heic:speed={AVIF_SPEED}",
+        str(output_path),
+    ]
+    _run_encoder("avif", command, output_path)
+
+
+def _encode_heic_candidate(
     input_png: Path,
     output_path: Path,
     quality: int,
     format_flags: Dict[str, str],
-    webp_method: int = 6,
 ) -> None:
-    codec = codec.lower()
-    if codec == "webp":
-        with Image.open(input_png) as image:
-            image.save(
-                output_path,
-                format="WEBP",
-                quality=quality,
-                method=webp_method,
-                lossless=False,
-            )
-        if not output_path.is_file():
-            raise RuntimeError("WEBP encoder did not produce an output file")
-        return
-    elif codec == "avif" or (
-        codec == "heic" and "w" in format_flags.get("HEIC", "")
-    ):
-        command = [IMAGEMAGICK, str(input_png), "-strip", "-quality", str(quality)]
-        if codec == "avif":
-            command.extend(["-define", f"heic:speed={AVIF_SPEED}"])
-        command.append(str(output_path))
-    elif codec == "heic":
+    if IMAGEMAGICK is not None and "w" in format_flags.get("HEIC", ""):
+        command = [
+            IMAGEMAGICK,
+            str(input_png),
+            "-strip",
+            "-quality",
+            str(quality),
+            str(output_path),
+        ]
+    else:
         command = [
             _require_tool("heif-enc"),
             *_heif_plugin_args(),
@@ -223,22 +240,62 @@ def _encode_candidate(
             "-o",
             str(output_path),
         ]
-    else:
-        command = [
-            _require_tool("bpgenc"),
-            "-q",
-            str(quality),
-            "-o",
-            str(output_path),
-            str(input_png),
-        ]
+    _run_encoder("heic", command, output_path)
 
-    result = _run(command)
-    if result.returncode != 0 or not output_path.is_file():
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(
-            detail or f"{codec.upper()} encoder failed with exit code {result.returncode}"
+
+def _encode_bpg_candidate(
+    input_png: Path,
+    output_path: Path,
+    quality: int,
+) -> None:
+    command = [
+        _require_tool("bpgenc"),
+        "-q",
+        str(quality),
+        "-o",
+        str(output_path),
+        str(input_png),
+    ]
+    _run_encoder("bpg", command, output_path)
+
+
+def _encode_webp_candidate(
+    input_png: Path,
+    output_path: Path,
+    quality: int,
+    method: int,
+) -> None:
+    with Image.open(input_png) as image:
+        image.save(
+            output_path,
+            format="WEBP",
+            quality=quality,
+            method=method,
+            lossless=False,
         )
+    if not output_path.is_file():
+        raise RuntimeError("WEBP encoder did not produce an output file")
+
+
+def _encode_candidate(
+    codec: str,
+    input_png: Path,
+    output_path: Path,
+    quality: int,
+    format_flags: Dict[str, str],
+    webp_method: int = 6,
+) -> None:
+    """Dispatch a quality candidate to its codec-specific encoder."""
+    if codec == "avif":
+        _encode_avif_candidate(input_png, output_path, quality)
+    elif codec == "heic":
+        _encode_heic_candidate(input_png, output_path, quality, format_flags)
+    elif codec == "bpg":
+        _encode_bpg_candidate(input_png, output_path, quality)
+    elif codec == "webp":
+        _encode_webp_candidate(input_png, output_path, quality, webp_method)
+    else:
+        raise ValueError(f"Unsupported codec: {codec}")
 
 
 def _decode_candidate(codec: str, encoded_path: Path, png_path: Path) -> None:
@@ -425,6 +482,62 @@ def compress_to_target_size(
             return metrics
         except (OSError, RuntimeError, ValueError) as exc:
             return {"error": f"{codec.upper()} compression failed: {exc}"}
+
+
+def compress_avif_to_target_size(
+    input_path: Path,
+    output_path: Path,
+    target_size_kb: float,
+    format_flags: Optional[Dict[str, str]] = None,
+) -> Dict[str, object]:
+    """Encode candidates as AVIF with ImageMagick, then select the closest size."""
+    return compress_to_target_size(
+        input_path, output_path, target_size_kb, "avif", format_flags
+    )
+
+
+def compress_heic_to_target_size(
+    input_path: Path,
+    output_path: Path,
+    target_size_kb: float,
+    format_flags: Optional[Dict[str, str]] = None,
+) -> Dict[str, object]:
+    """Encode candidates as HEIC with ImageMagick or the libheif encoder."""
+    return compress_to_target_size(
+        input_path, output_path, target_size_kb, "heic", format_flags
+    )
+
+
+def compress_bpg_to_target_size(
+    input_path: Path,
+    output_path: Path,
+    target_size_kb: float,
+    format_flags: Optional[Dict[str, str]] = None,
+) -> Dict[str, object]:
+    """Encode candidates with bpgenc and search its quantizer range."""
+    return compress_to_target_size(
+        input_path, output_path, target_size_kb, "bpg", format_flags
+    )
+
+
+def compress_webp_to_target_size(
+    input_path: Path,
+    output_path: Path,
+    target_size_kb: float,
+    format_flags: Optional[Dict[str, str]] = None,
+) -> Dict[str, object]:
+    """Encode WebP candidates with Pillow while searching quality and method."""
+    return compress_to_target_size(
+        input_path, output_path, target_size_kb, "webp", format_flags
+    )
+
+
+CODEC_COMPRESSORS = {
+    "avif": compress_avif_to_target_size,
+    "heic": compress_heic_to_target_size,
+    "bpg": compress_bpg_to_target_size,
+    "webp": compress_webp_to_target_size,
+}
 
 
 def _supported_images(input_dir: Path) -> Iterable[Path]:
@@ -671,11 +784,10 @@ def process_dataset(
                             continue
 
                     try:
-                        result = compress_to_target_size(
+                        result = CODEC_COMPRESSORS[codec](
                             input_path,
                             output_path,
                             target_size_kb,
-                            codec,
                             format_flags,
                         )
                     except KeyboardInterrupt:
