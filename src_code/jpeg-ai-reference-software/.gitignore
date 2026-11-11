@@ -1,0 +1,45 @@
+# Cached Files
+__pycache__/
+*.py[cod]
+*.pth
+
+# Data & Results
+data/
+runs/
+eval/
+result*/
+RESULT*/
+out.log
+out_off.log
+RESULTS_off/
+RESULTS_lsbs/
+RESULTS_both/
+base*/
+high*/
+
+# Jupyter Notebook
+*.ipynb
+.ipynb_checkpoints/
+
+# IDEs
+.vscode
+.idea
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+src/codec/entropy_coding/lib_wrappers/mans/cache*pt
+src/codec/entropy_coding/lib_wrappers/mans/*.so
+src/codec/entropy_coding/lib_wrappers/direct/*.so
+
+# Generated documentation (build with `make docs` / `make docs_single`)
+docs/html/
+docs/doxygen/generated/
+docs/doxygen/assets/mermaid.min.js
+docs/architecture.html
+docs/mermaid.min.js

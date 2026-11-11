@@ -1,0 +1,14 @@
+{
+	"!include": ["default.json"],
+	"model": {
+		"bitrate_matcher":{
+			"independent_beta_UV": 1,
+			"enabled": 1,
+			"use_default":0,
+			"rewrite_beta_list_file": 1,
+			"regen_beta_list": 1,
+			"tolerance_min":-0.1,
+			"tolerance_max":0.05
+		}
+	}
+}
