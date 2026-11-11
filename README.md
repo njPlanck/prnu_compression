@@ -94,3 +94,71 @@ generated files.
 For a fixed rate rather than a per-image file-size goal, omit `--target-size-kb` and
 use `--set-target-bpp N`, where `N` is the target rate in hundredths of a bit per
 pixel (for example, `12` means `0.12` bpp).
+
+### Still-image codec compression
+
+`src_code/compress_still.py` follows the folder traversal, per-camera reports, and
+per-image target-size workflow of `src_code/compression.py`, using the still-image
+codecs AVIF, HEIC, BPG, and WebP. It develops DNG files to RGB with `rawpy`,
+keeps image dimensions unchanged, and binary-searches codec quality for the
+closest tested file size to each requested target. It saves that closest result
+even if codec quality steps mean the target cannot be matched exactly; the
+reported size delta shows how close it got. Successful outputs are stored by
+target size, codec, and camera folder, with per-camera CSV reports alongside
+them.
+CSV progress is saved after every completed image/codec pair. Ctrl+C stops the
+current encode and preserves completed outputs and metrics. Use `--resume` when
+restarting to skip successful outputs within the configured tolerance (12 KiB
+by default).
+
+Run it from the repository root:
+
+```bash
+python src_code/compress_still.py \
+  --input-dir /path/to/query_set \
+  --output-dir /path/to/query_set_still_compressed \
+  --target-size-kb 100 250 500 \
+  --target-size-tolerance-kb 12 \
+  --resume
+```
+
+By default, the script tries all four codecs and uses editable input/output
+defaults near the top of the file. AVIF requires an ImageMagick build with AVIF
+write support. WebP uses Pillow's WebP encoder and requires Pillow to be built
+with WebP support; quality search uses Pillow's lossy quality setting rather
+than ImageMagick's WebP quality option. Its search checks encoder effort
+methods 0 through 6 as well as quality and records the selected method in the
+per-camera CSV.
+
+On Ubuntu, HEIC encoding requires the command-line utilities and HEVC encoder
+plugin:
+
+```bash
+sudo apt install libheif-examples libheif-plugin-x265
+```
+
+The script checks that `heif-enc` actually lists an HEVC encoder before starting
+HEIC encoding, so a decoder-only libheif installation is not mistaken for full
+HEIC support.
+
+BPG is not packaged in Ubuntu's repositories. Build its tools from the official
+[BPG source archive](https://bellard.org/bpg/libbpg-0.9.8.tar.gz):
+
+```bash
+curl -fLO https://bellard.org/bpg/libbpg-0.9.8.tar.gz
+tar -xzf libbpg-0.9.8.tar.gz
+cd libbpg-0.9.8
+make -j2 USE_X265= USE_JCTVC=y USE_BPGVIEW=
+install -d ~/.local/bin
+install -m 755 bpgenc bpgdec ~/.local/bin/
+```
+
+The JCTVC BPG backend is slower than x265, but does not require CMake or the
+bundled legacy x265 build. `~/.local/bin` is detected by the script even when it
+is not on `PATH`; the script also checks `~/.local/lib/libheif/plugins` for a
+user-local HEIC encoder plugin. HEIC and BPG outputs are decoded to verify them.
+Unavailable codecs are reported in the CSV rather than silently substituted.
+Image-quality metrics use the project's `torch` and `piq` dependencies.
+AVIF uses a faster encoder speed preset. BPG's quantizer runs in the opposite
+direction from the quality controls used by the other codecs, and the search
+accounts for that.
