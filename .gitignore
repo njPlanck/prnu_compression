@@ -30,7 +30,6 @@ trainjxr500kb/
 ai-image-compression/images/
 ai-image-compression/datasets/
 saved_models/
-src_code/__pycache__/
 testai/
 trainai/
 fivek_rgb_green_wavelet_fingerprints/
